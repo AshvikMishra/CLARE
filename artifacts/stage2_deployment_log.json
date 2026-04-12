@@ -1,9 +1,9 @@
 {
-  "stage2_test_mae": 46.62422120947722,
-  "stage2_test_rmse": 235.36724963875622,
-  "stage2_test_r2": 0.9992672712078018,
-  "stage2_cv_mae_mean": 47.69447643591309,
-  "stage2_cv_rmse_mean": 230.48669952644673,
+  "stage2_test_mae": 47.769665408249935,
+  "stage2_test_rmse": 237.00478949575512,
+  "stage2_test_r2": 0.9992570399917814,
+  "stage2_cv_mae_mean": 48.250131144531245,
+  "stage2_cv_rmse_mean": 231.36734297846164,
   "average_risk_haircut_pct": 45.285423278808594,
   "stage2_model_path": "C:\\Users\\Ashvik\\projects\\CLARE\\stage2_regressor.json"
 }

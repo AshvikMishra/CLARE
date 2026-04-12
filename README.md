@@ -40,11 +40,12 @@ This repository contains a production-style credit allocation workflow:
 Core files:
 
 - accepted_loans.csv: primary dataset used by both stages
-- codex-test-stage-1.ipynb: PD model development and evaluation
-- codex-test-stage-2.ipynb: capacity model and final risk-adjusted allocation
+- test-stage-1.ipynb: PD model development and evaluation
+- test-stage-2.ipynb: capacity model, risk-adjusted allocation, and Stage 2 SHAP explainability
 - artifacts/pd_model_metrics.csv: Stage 1 headline metrics
 - artifacts/stage2_allocator_metrics.csv: Stage 2 headline metrics
 - artifacts/stage2_deployment_log.json: deployment-style Stage 2 log
+- artifacts/stage2_shap_feature_importance.csv: Stage 2 global feature impact ranking
 - artifacts/models/: saved preprocessors and trained models
 - plots/: generated diagnostics and explainability charts
 
@@ -110,7 +111,8 @@ $$
 Final\_Limit = \max(0, Raw\_Capacity) \times (1 - PD)
 $$
 
-10. Save simulation outputs and deployment metrics.
+10. Generate Stage 2 SHAP global explainability (top factors affecting Raw Capacity).
+11. Save simulation outputs, deployment metrics, and SHAP artifacts.
 
 Outputs:
 
@@ -118,7 +120,8 @@ Outputs:
 - artifacts/stage2_allocator_metrics.csv
 - artifacts/stage2_deployment_log.json
 - artifacts/stage2_final_limit_simulation.csv
-- stage2 parity/residual/distribution plots in plots/
+- artifacts/stage2_shap_feature_importance.csv
+- stage2 parity/residual/distribution/SHAP plots in plots/
 
 ## ML Workflow Used For This Dataset
 
@@ -163,8 +166,9 @@ This is the exact workflow pattern used on accepted_loans.csv in this repo.
 ### E. Explainability and Stability
 
 1. SHAP summary and force plots for Stage 1.
-2. Multi-seed persona stress test for Stage 1 robustness.
-3. Saved stability logs for reproducibility.
+2. SHAP global feature ranking and summary plot for Stage 2 capacity model.
+3. Multi-seed persona stress test for Stage 1 robustness.
+4. Saved stability logs and Stage 2 SHAP artifacts for reproducibility.
 
 ### F. Inference and Deployment Pattern
 
@@ -198,6 +202,7 @@ This contract is demonstrated in the inference-only section of Stage 2 notebook 
 - artifacts/stage2_allocator_metrics.csv: Stage 2 regression metrics and haircut summary
 - artifacts/stage2_deployment_log.json: deployment-style metrics snapshot
 - artifacts/stage2_final_limit_simulation.csv: sampled final limit distribution
+- artifacts/stage2_shap_feature_importance.csv: Stage 2 global SHAP feature importance ranking
 - artifacts/models/stage1_preprocessor_bundle.joblib: Stage 1 transform bundle
 - artifacts/models/stage2_preprocessor_bundle.joblib: Stage 2 transform bundle
 - stage1_classifier.json and stage2_regressor.json: trained model binaries
