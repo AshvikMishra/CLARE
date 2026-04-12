@@ -1,263 +1,208 @@
-# CLARE
+# CLARE: Credit Limit Allocation with Risk Estimation
 
-Credit Limit Allocation and Risk Engine
+## Executive Summary
 
-## 1. Project Overview
+CLARE is a two-stage machine learning pipeline built on Lending Club-style accepted loan data to produce risk-adjusted lending limits.
 
-This project is evolving from binary loan approval into a continuous capital allocation engine.
-
-Primary outcome:
-- Predict a safe loan allocation amount per borrower (regression), not just approve/reject.
-
-Why this matters:
-- A continuous allocation target is closer to real-world lending operations.
-- It supports better risk pricing, portfolio construction, and capital efficiency.
-- It creates more business value than a pure binary decision model.
-
-## 2. Core Objective
-
-Build a leakage-safe model that estimates how much capital can be allocated to each applicant while controlling downside risk.
-
-Formally:
-- Input: applicant-level, decision-time features.
-- Output: safe allocation amount (USD).
-- Model family: tree boosting first (XGBoost), with explainability via SHAP.
-
-## 3. Data Reality Check (Critical)
-
-### 3.1 Data Leakage Policy
-
-Any post-origination or post-performance columns must be excluded from training.
-
-Drop these columns before modeling:
-- `loan_status`
-- `balance`
-- `paid_total`
-- `paid_principal`
-- `paid_interest`
-- `paid_late_fees`
-- `issue_month`
-- `out_prncp` (if present)
-
-Reason:
-- These variables are generated after underwriting/servicing events.
-- Including them would produce unrealistic offline performance and fail in production.
-
-### 3.2 Features to Prioritize
-
-Capacity to pay:
-- `annual_income`
-- `debt_to_income`
-- `total_credit_limit`
-
-Credit history and behavior:
-- `delinq_2y`
-- `earliest_credit_line`
-- `num_historical_failed_to_pay`
-- `inquiries_last_12m`
-
-Current burden / utilization:
-- `total_credit_utilized`
-- `open_credit_lines`
-
-Contextual categoricals:
-- `homeownership`
-- `loan_purpose`
-- `emp_length`
-
-Optional decision-time signals:
-- `grade`, `sub_grade` (only if truly available at decision time in your target deployment workflow).
-
-## 4. Defining the Regression Target
-
-Do not use raw `loan_amount` as the target by itself.
-
-If you do, the model mainly learns historical officer behavior instead of true risk-adjusted affordability.
-
-### Approach A: Risk-Adjusted Target Engineering (Recommended Start)
-
-Construct a synthetic safe allocation target from affordability.
-
-Example framework:
-
-1. Estimate safe monthly payment capacity:
+1. Stage 1 predicts Probability of Default (PD) per applicant.
+2. Stage 2 predicts Raw Capacity (the unconstrained affordable loan amount).
+3. Final lending limit is risk-adjusted using:
 
 $$
-M_{safe} = \max\left(0, \alpha \cdot \frac{annual\_income \cdot (1 - dti)}{12}\right)
+Final\_Limit = Raw\_Capacity \times (1 - PD)
 $$
 
-Where:
-- $dti$ is debt-to-income expressed as a fraction.
-- $\alpha$ is a policy coefficient (for example 0.2 to 0.35, tuned with risk team input).
+What this means in business terms:
 
-2. Convert payment capacity into maximum principal using an annuity relationship:
+- Higher-risk applicants get a larger haircut.
+- Lower-risk applicants retain more of their raw capacity.
+- The system creates a transparent balance between growth and credit risk control.
 
-$$
-L_{safe} = M_{safe} \cdot \frac{1 - (1+r)^{-T}}{r}
-$$
+Latest run highlights from saved artifacts in this repo:
 
-Where:
-- $r$ is monthly base interest rate.
-- $T$ is term in months (for example, 36).
+- Stage 1 PD model test ROC-AUC: 0.7672
+- Stage 1 CV ROC-AUC mean: 0.7599 (std: 0.0021)
+- Stage 2 allocator test MAE: 46.62
+- Stage 2 allocator test RMSE: 235.37
+- Stage 2 allocator test R2: 0.9993
+- Average portfolio risk haircut: 45.29%
+- Dataset rows used in Stage 1 modeling: 2,245,134
 
-This yields a continuous target aligned with affordability and repayment capacity.
+## Project At A Glance
 
-### Approach B: Two-Stage Risk + Allocation
+This repository contains a production-style credit allocation workflow:
 
-1. Stage 1: predict default probability (classification).
-2. Stage 2: predict allocation amount (regression), conditioned on risk threshold.
+- Notebook 1: Stage 1 PD modeling, validation, explainability, and stability testing
+- Notebook 2: Stage 2 capacity modeling and integration with Stage 1 PD
+- Saved model artifacts for inference-only scoring (no retraining required)
+- Audit and metrics files for reproducibility
 
-Use this when policy requires explicit probability-of-default gating before amount optimization.
+Core files:
 
-## 5. End-to-End Workflow
+- accepted_loans.csv: primary dataset used by both stages
+- codex-test-stage-1.ipynb: PD model development and evaluation
+- codex-test-stage-2.ipynb: capacity model and final risk-adjusted allocation
+- artifacts/pd_model_metrics.csv: Stage 1 headline metrics
+- artifacts/stage2_allocator_metrics.csv: Stage 2 headline metrics
+- artifacts/stage2_deployment_log.json: deployment-style Stage 2 log
+- artifacts/models/: saved preprocessors and trained models
+- plots/: generated diagnostics and explainability charts
 
-This workflow consolidates and upgrades `ML_workflow.md`.
+## How The System Works
 
-1. Define target
-- Build `safe_loan_amount` (Approach A) or choose two-stage setup (Approach B).
+### Stage 1: PD Estimator
 
-2. EDA
-- Distribution checks, missingness audit, outlier review, pairwise correlation, and leakage scan.
+Goal: learn $P(Default\mid x)$ from accepted loan records.
 
-3. Data cleaning and leakage prevention
-- Remove post-origination fields and ID-like non-generalizable artifacts.
+High-level flow:
 
-4. Preprocessing
-- Imputation:
-    - Numeric: median/mean.
-    - Categorical: "Unknown" placeholder where needed.
-- Encoding:
-    - One-hot for nominal categories (`homeownership`, `loan_purpose`, etc.).
-    - Ordinal encoding for naturally ordered grades (`grade`, `sub_grade`).
-- Scaling:
-    - Not required for XGBoost.
-    - Required for models like SVM, logistic regression, neural networks.
-
-5. Train/test split
-- Typical split: 80/20.
-- Perform split before any resampling to avoid bleed.
-
-6. Baseline model
-- Train `DummyRegressor` (mean predictor).
-- Every advanced model must beat this baseline.
-
-7. Model training
-- Main model: `XGBRegressor`.
-- Benchmark models: linear regression, random forest, optionally CatBoost/LightGBM.
-
-8. Hyperparameter tuning
-- `RandomizedSearchCV` or `GridSearchCV`.
-- Priority parameters:
-    - `n_estimators`
-    - `max_depth`
-    - `learning_rate`
-    - `min_child_weight`
-    - `subsample`
-    - `colsample_bytree`
-    - `reg_lambda`, `reg_alpha`
-
-9. Evaluation
-- Primary metrics:
-    - RMSE
-    - MAE
-- Secondary metrics:
-    - $R^2$
-    - Error by borrower segments (fairness and stability check).
-
-10. Explainability (xAI)
-- Use SHAP global summary + local force/waterfall explanations.
-- Verify learned behavior aligns with credit policy intuition.
-
-## 6. Modeling Math Foundation
-
-### 6.1 XGBoost Objective
-
-At boosting step $t$, optimize:
+1. Load accepted loan data and optimize memory footprint.
+2. Create target using status mapping:
+	- Bad: Charged Off, Default, Late (31-120 days)
+	- Good: Fully Paid, Current
+3. Drop leakage and administrative columns.
+4. Apply missingness policy:
+	- Drop columns with more than 90% missing
+	- Add missingness flags for 50-90% missing columns
+5. Impute:
+	- Numeric: median
+	- Categorical: mode
+6. Outlier handling on annual income and DTI:
+	- Clip at 1st and 99th percentiles
+	- Robust scaling
+7. Label-encode categorical features.
+8. Train XGBoost classifier on GPU with class-imbalance weighting:
 
 $$
-Obj^{(t)} = \sum_{i=1}^{n} l\left(y_i, \hat{y}_i^{(t-1)} + f_t(x_i)\right) + \Omega(f_t)
+scale\_pos\_weight = \frac{N_{good}}{N_{bad}}
 $$
 
-Interpretation:
-- $l(\cdot)$: prediction loss (for regression, typically squared error).
-- $f_t$: the new tree that corrects prior residual errors.
-- $\Omega(f_t)$: regularization penalty on tree complexity to reduce overfitting.
+9. Optimize with Optuna (AUC objective).
+10. Evaluate with confusion matrix, ROC-AUC, and calibration curve.
+11. Generate SHAP global and local explanations.
+12. Run persona-based stability experiments across multiple random seeds.
 
-XGBoost uses first and second derivatives (gradient + hessian) to choose splits efficiently.
+Outputs:
 
-### 6.2 SHAP Values
+- stage1_classifier.json
+- artifacts/pd_model_metrics.csv
+- artifacts/preprocessing_audit.csv
+- stability_results.csv
+- explainability and validation plots in plots/
 
-SHAP value for feature $i$:
+### Stage 2: Capital Allocator
 
-$$
-\phi_i = \sum_{S \subseteq N \setminus \{i\}} \frac{|S|!(|N|-|S|-1)!}{|N|!}\left[v(S \cup \{i\}) - v(S)\right]
-$$
+Goal: predict raw affordable loan capacity and convert it into final risk-adjusted limit.
 
-Interpretation:
-- Measures each feature's marginal contribution across all feature coalitions.
-- Produces additive local explanations: baseline prediction + feature contributions = final prediction.
+High-level flow:
 
-## 7. Credit Risk Context (Portfolio Layer)
-
-The allocation model can later be connected to classic risk equations:
-
-Expected Loss:
-
-$$
-EL = PD \cdot LGD \cdot EAD
-$$
-
-Portfolio loss approximation:
+1. Load same accepted loan dataset.
+2. Define Stage 2 training population as Fully Paid loans.
+3. Target variable: loan_amnt.
+4. Reuse robust preprocessing approach (missingness policy, imputation, encoding, scaling).
+5. Train XGBoost regressor on GPU.
+6. Tune with Optuna (RMSE objective).
+7. Evaluate with MAE, RMSE, R2, and cross-validated error.
+8. Score test applicants with Stage 1 PD model.
+9. Apply haircut logic:
 
 $$
-PL = \sum_i PD_i \cdot LGD_i \cdot EAD_i
+Final\_Limit = \max(0, Raw\_Capacity) \times (1 - PD)
 $$
 
-Portfolio expected return (lending lens):
+10. Save simulation outputs and deployment metrics.
 
-$$
-E[R] = \sum \text{Interest Income} - EL
-$$
+Outputs:
 
-Future tail-risk extension:
-- VaR and Expected Shortfall (CVaR) can be layered at portfolio optimization stage.
+- stage2_regressor.json
+- artifacts/stage2_allocator_metrics.csv
+- artifacts/stage2_deployment_log.json
+- artifacts/stage2_final_limit_simulation.csv
+- stage2 parity/residual/distribution plots in plots/
 
-## 8. Implementation Plan and Milestones
+## ML Workflow Used For This Dataset
 
-Phase 1: Data audit and target design
-- Finalize leakage-safe feature list.
-- Implement `safe_loan_amount` target generation and document assumptions.
+This is the exact workflow pattern used on accepted_loans.csv in this repo.
 
-Phase 2: Baselines and first XGBoost
-- Build baseline regressors.
-- Train first leakage-safe `XGBRegressor`.
+### A. Data and Target Design
 
-Phase 3: Tuning and validation
-- Run hyperparameter search.
-- Validate performance across risk segments and loan purposes.
+1. Input source: accepted_loans.csv
+2. Stage 1 target: default_flag from loan_status mapping
+3. Stage 2 target: loan_amnt on Fully Paid subset
 
-Phase 4: Explainability and policy review
-- Generate SHAP global and local reports.
-- Confirm model behavior with business/risk logic.
+### B. Leakage and Governance
 
-Phase 5: Portfolio integration (future)
-- Connect per-loan predictions to portfolio constraints.
-- Add regime-aware stress testing and tail-risk controls.
+1. Remove post-origination payment and recovery fields.
+2. Remove administrative identifiers and free-text metadata.
+3. Persist preprocessing audit for traceability.
 
-## 9. Definition of Done
+### C. Feature Engineering and Preprocessing
 
-Minimum acceptable project state:
-- Leakage columns removed and documented.
-- Target formulation documented with assumptions.
-- Baseline vs tuned XGBoost comparison available.
-- MAE/RMSE reported on held-out test set.
-- SHAP explanation artifacts generated.
-- Reproducible training pipeline with fixed random seeds.
+1. Parse and normalize rates/dates (int_rate, issue_year).
+2. Missingness strategy:
+	- Drop >90% missing columns
+	- Missingness indicators for 50-90% missing columns
+3. Numeric imputation (median) and categorical imputation (mode).
+4. Outlier clipping and robust scaling for heavy-tailed financial variables.
+5. Label encoding for categorical predictors.
 
-## 10. Immediate Next Build Tasks
+### D. Modeling Strategy
 
-1. Create a data dictionary marking each feature as decision-time vs post-origination.
-2. Implement and validate `safe_loan_amount` target engineering script.
-3. Build a single sklearn pipeline for imputation, encoding, and model training.
-4. Train baseline + XGBoost and record RMSE/MAE.
-5. Generate SHAP summary and top-20 feature impact report.
+1. Stage 1 model: XGBClassifier
+	- Objective: binary:logistic
+	- Metric: AUC
+	- Class imbalance correction via scale_pos_weight
+2. Stage 2 model: XGBRegressor
+	- Objective: reg:squarederror
+	- Metric: RMSE/MAE/R2
+3. Hyperparameter search: Optuna TPE sampler
+4. Validation:
+	- Stage 1: holdout + 5-fold stratified CV AUC
+	- Stage 2: holdout + 5-fold CV MAE/RMSE
+
+### E. Explainability and Stability
+
+1. SHAP summary and force plots for Stage 1.
+2. Multi-seed persona stress test for Stage 1 robustness.
+3. Saved stability logs for reproducibility.
+
+### F. Inference and Deployment Pattern
+
+1. Load saved Stage 1 and Stage 2 models plus preprocessing bundles.
+2. Transform new applicants with the saved bundles (no retraining).
+3. Compute PD and raw capacity.
+4. Return risk-adjusted final limit and haircut percentage.
+
+## Inference Contract
+
+Given applicant profile(s), the pipeline returns:
+
+- PD: probability of default
+- Raw_Capacity: unconstrained predicted limit
+- Final_Limit: risk-adjusted limit after haircut
+- Risk_Haircut_Pct: $PD \times 100$
+
+This contract is demonstrated in the inference-only section of Stage 2 notebook using mock applicant profiles and saved artifacts.
+
+## Reproducing The Pipeline
+
+1. Run Stage 1 notebook to train and validate PD model artifacts.
+2. Run Stage 2 notebook to train allocator and produce final limit simulation.
+3. Use saved models in artifacts/models/ for inference-only scoring in notebook or service layer.
+
+## Generated Artifacts Overview
+
+- artifacts/pd_model_metrics.csv: Stage 1 AUC and run metadata
+- artifacts/preprocessing_audit.csv: dropped/flagged columns and encoding audit
+- stability_results.csv: multi-seed Stage 1 robustness results
+- artifacts/stage2_allocator_metrics.csv: Stage 2 regression metrics and haircut summary
+- artifacts/stage2_deployment_log.json: deployment-style metrics snapshot
+- artifacts/stage2_final_limit_simulation.csv: sampled final limit distribution
+- artifacts/models/stage1_preprocessor_bundle.joblib: Stage 1 transform bundle
+- artifacts/models/stage2_preprocessor_bundle.joblib: Stage 2 transform bundle
+- stage1_classifier.json and stage2_regressor.json: trained model binaries
+
+## Notes
+
+- The current implementation is built on accepted loan data and is suitable for offline modeling and policy simulation.
+- For production use, add strict schema validation, drift monitoring, periodic recalibration, and policy constraints (min/max limits, affordability caps, regulatory checks).
