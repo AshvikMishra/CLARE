@@ -1,0 +1,9 @@
+metric,value
+test_auc,0.7671752222611729
+cv_auc_mean,0.759929588152274
+cv_auc_std,0.0020624902141299552
+scale_pos_weight,6.740072311066869
+rows_used,2245134.0
+features_used,97.0
+high_risk_test_index,60253.0
+optuna_best_auc,0.7605154984724751
