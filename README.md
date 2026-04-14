@@ -1,31 +1,46 @@
-# CLARE: Credit Limit Allocation with Risk Estimation
+# CLARE: Credit Decision System Roadmap
 
-This repository is now organized into separate Stage 1 and Stage 2 workstreams.
+## Status (At a Glance)
 
-## Project Structure
+- Stage 1 complete: leakage-safe, calibrated Probability of Default (PD) model.
+- Current notebook: `stage1/test-stage-1.ipynb`.
+- Current data: `data/accepted_loans.csv`.
 
-- `stage1/`: Probability of Default (PD) model workflow (stable baseline)
-- `stage2/`: Capacity allocator workflow (isolated for rebuild)
-- `shared_assets/models/`: shared model and preprocessing bundles
-- `shared_assets/plots/`: shared diagnostic and explainability plots
-- `docs/`: migration notes, critique notes, and archived legacy docs
-- `data/`: additional datasets
-- `data/accepted_loans.csv`: primary dataset currently used by both stages
+## Stage 1 Deliverable
 
-## Stage Separation
+- Clean PD model with out-of-time validation.
+- Core metrics: AUC, Brier, calibration quality.
+- Output used as risk input for downstream decisioning.
 
-- Stage 1 remains the reference risk engine.
-- Stage 2 is separated so it can be rebuilt from scratch with minimal coupling.
-- Legacy markdown content was archived to reduce root-level documentation clutter.
+## What Comes Next (Concise Plan)
 
-## Quick Start
+1. Reject inference
+- Debias PD by incorporating rejected applicants.
+- Compare baseline vs corrected model on AUC, calibration, and PD shift.
 
-1. Open `stage1/test-stage-1.ipynb` for PD modeling work.
-2. Open `stage2/test-stage-2.ipynb` for allocator transition and redesign.
-3. Review `docs/MIGRATION_NOTES.md` before deleting or deduplicating old files.
+2. Approval policy from PD
+- Convert PD into approve/reject decisions using expected loss:
+	$$EL = PD \times LGD \times EAD$$
+- Approve when risk is below policy threshold.
 
-## Safety
+3. Profit-risk optimization
+- Evaluate PD cutoffs by approval rate, default rate, and expected profit:
+	$$Profit = Interest - (PD \times LGD \times EAD)$$
 
-- Reorganization was done non-destructively first (copy before cleanup).
-- Root-level original models and artifacts are still present until explicit cleanup approval.
+4. Loan allocation engine
+- Replace "predict loan amount" with policy optimization.
+- For each applicant, choose the highest loan size satisfying risk constraints.
+
+5. Unified decision engine
+- Pipeline: Applicant features -> PD -> Risk -> Approve/Reject -> Loan amount.
+
+6. Portfolio evaluation
+- Report portfolio-level default rate, approval rate, and expected profit.
+
+## Planned Notebook Flow
+
+1. Notebook 1: Clean PD model (done).
+2. Notebook 2: Reject inference.
+3. Notebook 3: Decision policy and threshold tuning.
+4. Notebook 4: Allocation engine and portfolio simulation.
 
